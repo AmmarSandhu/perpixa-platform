@@ -331,12 +331,36 @@ def stage_analyze_input(input_type: str, config: dict, output_dir: Path) -> dict
     }
 
 
+
+# =========================================================
+# JOB PATH HELPERS (STEP 4)
+# =========================================================
+
+def get_reel_dir(output_dir: Path, reel_index: int) -> Path:
+    """
+    Returns the directory for a specific reel.
+    Enforces consistent job-safe structure.
+    """
+    return output_dir / f"reel_{reel_index:02d}"
+
+
+def get_images_dir(reel_dir: Path) -> Path:
+    """
+    Returns the images directory for a reel.
+    """
+    return reel_dir / "images"
+
+
+
+
 def stage_generate_assets(reels: list, output_dir: Path) -> list:
     assets = []
 
     for idx, reel in enumerate(reels, start=1):
-        reel_dir = output_dir / f"reel_{idx:02d}"
-        images_dir = reel_dir / "images"
+        
+        reel_dir = get_reel_dir(output_dir, idx)
+        images_dir = get_images_dir(reel_dir)
+
         reel_dir.mkdir(parents=True, exist_ok=True)
         images_dir.mkdir(parents=True, exist_ok=True)
 
