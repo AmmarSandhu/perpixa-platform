@@ -68,11 +68,15 @@ CHAPTER TEXT:
 {chapter_text}
 """
 
-    response = client.chat.completions.create(
+    try:
+        response = client.chat.completions.create(
         model="gpt-4.1-mini",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.4
-    )
+        )
+    except Exception as e:
+        raise SystemFailure(f"LLM analysis failed: {e}") from e
+    
 
     content = response.choices[0].message.content
     try:
@@ -129,7 +133,7 @@ SOURCE MATERIAL:
         except json.JSONDecodeError:
             continue
 
-    raise RuntimeError("Failed to generate reel scripts")
+    raise SystemFailure("Failed to generate reel scripts")
 
 
 # -------------------------------
@@ -180,7 +184,7 @@ NARRATION:
 
     parsed = json.loads(text)
     if "images" not in parsed:
-        raise ValueError("Invalid image prompt output")
+        raise SystemFailure("Invalid image prompt output")
 
     return parsed
 
@@ -188,7 +192,8 @@ NARRATION:
 def generate_image(prompt: str, output_path: Path, max_retries: int = 3):
     hf_token = os.getenv("HUGGINGFACE_TOKEN")
     if not hf_token:
-        raise RuntimeError("HUGGINGFACE_TOKEN not set")
+        # 🚨 System misconfiguration → refundable
+        raise SystemFailure("HUGGINGFACE_TOKEN not set")
 
     model_id = "stabilityai/stable-diffusion-xl-base-1.0"
     url = f"https://router.huggingface.co/hf-inference/models/{model_id}"
@@ -212,19 +217,34 @@ def generate_image(prompt: str, output_path: Path, max_retries: int = 3):
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     for attempt in range(1, max_retries + 1):
-        response = requests.post(url, headers=headers, json=payload, timeout=120)
+        try:
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=120
+            )
+        except Exception as e:
+            # 🚨 Network / request failure → refundable
+            raise SystemFailure(f"SDXL request failed: {e}") from e
 
         if response.status_code == 200:
             output_path.write_bytes(response.content)
             return
 
+        # Retry-safe HF failures
         if response.status_code in (429, 503):
             time.sleep(5 * attempt)
             continue
 
-        raise RuntimeError(f"SDXL failed: {response.status_code}")
+        # 🚨 Hard HF failure → refundable
+        raise SystemFailure(
+            f"SDXL failed: {response.status_code} {response.text}"
+        )
 
-    raise RuntimeError("SDXL unavailable after retries")
+    # 🚨 All retries exhausted → refundable
+    raise SystemFailure("SDXL unavailable after retries")
+
 
 
 # -------------------------------
@@ -233,26 +253,36 @@ def generate_image(prompt: str, output_path: Path, max_retries: int = 3):
 def generate_voiceover(text: str, output_path: Path):
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY not set")
+        # 🚨 System misconfiguration → refundable
+        raise SystemFailure("OPENAI_API_KEY not set")
 
-    response = requests.post(
-        "https://api.openai.com/v1/audio/speech",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        },
-        json={
-            "model": "gpt-4o-mini-tts",
-            "voice": "alloy",
-            "input": text,
-            "format": "mp3"
-        }
-    )
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/audio/speech",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "gpt-4o-mini-tts",
+                "voice": "alloy",
+                "input": text,
+                "format": "mp3"
+            },
+            timeout=120
+        )
+    except Exception as e:
+        # 🚨 Network / request failure → refundable
+        raise SystemFailure(f"TTS request failed: {e}") from e
 
     if response.status_code != 200:
-        raise RuntimeError("TTS failed")
+        # 🚨 OpenAI TTS failure → refundable
+        raise SystemFailure(
+            f"TTS failed: {response.status_code} {response.text}"
+        )
 
     output_path.write_bytes(response.content)
+
 
 
 # -------------------------------
@@ -304,18 +334,18 @@ def stage_analyze_input(input_type: str, config: dict, output_dir: Path) -> dict
     elif input_type == "text":
         source_text = config.get("text", "").strip()
         if not source_text:
-            raise ValueError("Empty text input")
+            raise UserContentError("Empty text input")
 
     elif input_type == "prompt":
         prompt = config.get("prompt", "").strip()
         if not prompt:
-            raise ValueError("Empty prompt input")
+            raise UserContentError("Empty prompt input")
 
         analysis = analyze_chapter_with_ai(prompt)
         source_text = analysis.get("raw_output", prompt)
 
     else:
-        raise ValueError("Unsupported input_type")
+        raise UserContentError("Unsupported input_type")
 
     analysis = analyze_chapter_with_ai(source_text)
     reels = generate_reel_scripts(analysis)
@@ -329,6 +359,33 @@ def stage_analyze_input(input_type: str, config: dict, output_dir: Path) -> dict
         "analysis": analysis,
         "reels": reels
     }
+
+
+# =========================================================
+# FAILURE CLASSIFICATION (STEP 5)
+# =========================================================
+
+class EngineError(Exception):
+    """Base class for engine failures."""
+
+
+class SystemFailure(EngineError):
+    """
+    Indicates a system-side failure.
+    Eligible for credit refund.
+    """
+    pass
+
+
+class UserContentError(EngineError):
+    """
+    Indicates user input / content issue.
+    NOT eligible for refund.
+    """
+    pass
+
+
+
 
 
 
@@ -454,29 +511,49 @@ def run_job(
     # -------------------------------
     input_type = config.get("input_type")
     if not input_type:
-        raise ValueError("input_type is required in config")
+        raise UserContentError("input_type is required in config")
 
     # -------------------------------
-    # 2. PIPELINE EXECUTION (STEP 3)
+    # 2. PIPELINE EXECUTION (STEP 5)
     # -------------------------------
-    pipeline = stage_analyze_input(
-        input_type=input_type,
-        config=config,
-        output_dir=output_dir
-    )
+    try:
+        pipeline = stage_analyze_input(
+            input_type=input_type,
+            config=config,
+            output_dir=output_dir
+        )
 
-    assets = stage_generate_assets(
-        reels=pipeline["reels"],
-        output_dir=output_dir
-    )
+        assets = stage_generate_assets(
+            reels=pipeline["reels"],
+            output_dir=output_dir
+        )
 
-    videos = stage_assemble_videos(
-        assets=assets,
-        output_dir=output_dir
-    )
+        videos = stage_assemble_videos(
+            assets=assets,
+            output_dir=output_dir
+        )
+
+    except SystemFailure:
+        # System failure → bubble up (refund eligible)
+        raise
+
+    except UserContentError as e:
+        # User/content error → no refund
+        return {
+            "job_id": job_id,
+            "user_id": user_id,
+            "status": "failed",
+            "reason": "user_content_error",
+            "message": str(e),
+            "output_dir": str(output_dir)
+        }
+
+    except Exception as e:
+        # Unknown error → treat as system failure (refund eligible)
+        raise SystemFailure(f"Unhandled engine error: {e}") from e
 
     # -------------------------------
-    # 3. RETURN METADATA
+    # 3. RETURN METADATA (SUCCESS)
     # -------------------------------
     return {
         "job_id": job_id,
@@ -486,3 +563,4 @@ def run_job(
         "videos": videos,
         "output_dir": str(output_dir)
     }
+
