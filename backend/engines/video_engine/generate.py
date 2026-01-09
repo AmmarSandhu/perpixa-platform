@@ -290,3 +290,142 @@ def assemble_video(
         verbose=False,
         logger=None
     )
+
+
+# =========================================================
+# ENGINE ENTRY POINT (Perpixa Contract)
+# =========================================================
+
+def run_job(
+    job_id: str,
+    user_id: str,
+    config: dict,
+    output_dir: str | Path
+) -> dict:
+    """
+    Executes ONE complete video generation job.
+
+    Rules:
+    - One job = one output directory
+    - No global state
+    - All outputs MUST stay inside output_dir
+    - Raise exceptions on system failure
+    """
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # -------------------------------
+    # 1. NORMALIZE INPUT
+    # -------------------------------
+    input_type = config.get("input_type")
+
+    if input_type == "pdf":
+        pdf_path = Path(config["pdf_path"])
+        if not pdf_path.exists():
+            raise FileNotFoundError("PDF file not found")
+
+        source_text = extract_text_from_file(pdf_path)
+
+    elif input_type == "text":
+        source_text = config.get("text", "").strip()
+        if not source_text:
+            raise ValueError("Empty text input")
+
+    elif input_type == "prompt":
+        prompt = config.get("prompt", "").strip()
+        if not prompt:
+            raise ValueError("Empty prompt input")
+
+        # Expand prompt into teaching-style text
+        source_text = analyze_chapter_with_ai(prompt).get(
+            "raw_output", prompt
+        )
+
+    else:
+        raise ValueError("Unsupported input_type")
+
+    # Persist normalized text (debug + audit)
+    (output_dir / "source_text.txt").write_text(
+        source_text, encoding="utf-8"
+    )
+
+    # -------------------------------
+    # 2. ANALYSIS & REEL SCRIPTS
+    # -------------------------------
+    analysis = analyze_chapter_with_ai(source_text)
+    reels = generate_reel_scripts(analysis)
+
+    (output_dir / "analysis.json").write_text(
+        json.dumps(analysis, indent=2),
+        encoding="utf-8"
+    )
+
+    (output_dir / "reels.json").write_text(
+        json.dumps(reels, indent=2),
+        encoding="utf-8"
+    )
+
+    # -------------------------------
+    # 3. GENERATE ASSETS PER REEL
+    # -------------------------------
+    final_videos = []
+
+    for idx, reel in enumerate(reels, start=1):
+        reel_dir = output_dir / f"reel_{idx:02d}"
+        images_dir = reel_dir / "images"
+        reel_dir.mkdir(parents=True, exist_ok=True)
+        images_dir.mkdir(parents=True, exist_ok=True)
+
+        narration = reel.get("spoken_narration", "").strip()
+        if not narration:
+            continue
+
+        # Voiceover
+        audio_path = reel_dir / "voiceover.mp3"
+        generate_voiceover(narration, audio_path)
+
+        # Image prompts
+        image_plan = generate_image_prompts(
+            reel_title=reel.get("reel_title", f"Reel {idx}"),
+            spoken_narration=narration
+        )
+
+        (reel_dir / "image_prompts.json").write_text(
+            json.dumps(image_plan, indent=2),
+            encoding="utf-8"
+        )
+
+        # Generate images
+        for image in image_plan.get("images", []):
+            image_id = image.get("image_id")
+            prompt = image.get("prompt")
+
+            if not prompt:
+                continue
+
+            image_path = images_dir / f"image_{image_id:02d}.png"
+            generate_image(prompt, image_path)
+
+        # Assemble final video
+        final_video_path = reel_dir / "final_video.mp4"
+        assemble_video(
+            images_dir=images_dir,
+            audio_path=audio_path,
+            output_path=final_video_path
+        )
+
+        if final_video_path.exists():
+            final_videos.append(str(final_video_path))
+
+    # -------------------------------
+    # 4. RETURN METADATA
+    # -------------------------------
+    return {
+        "job_id": job_id,
+        "user_id": user_id,
+        "status": "completed",
+        "reels_created": len(final_videos),
+        "videos": final_videos,
+        "output_dir": str(output_dir)
+    }
