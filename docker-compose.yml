@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: perpixa_postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: perpixa
+      POSTGRES_USER: perpixa
+      POSTGRES_PASSWORD: perpixa
+    volumes:
+      - perpixa_pgdata:/var/lib/postgresql/data
+
+volumes:
+  perpixa_pgdata:
