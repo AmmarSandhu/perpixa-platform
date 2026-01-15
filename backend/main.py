@@ -4,7 +4,7 @@ from backend.database import engine, Base
 from backend.jobs.models import Job  # noqa: F401 (ensures model is registered)
 
 from backend.credits.models import CreditBalance, CreditTransaction  # noqa
-
+from backend.jobs.routes import router as jobs_router
 # -------------------------------------------------
 # FASTAPI APP
 # -------------------------------------------------
@@ -13,6 +13,8 @@ app = FastAPI(
     title="Perpixa Platform API",
     version="v1",
 )
+
+app.include_router(jobs_router)
 
 # -------------------------------------------------
 # STARTUP EVENT
