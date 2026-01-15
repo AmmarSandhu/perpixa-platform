@@ -8,6 +8,9 @@ from backend.jobs.routes import router as jobs_router
 
 from backend.users.models import User  # noqa
 from backend.auth.models import MagicLinkToken  # noqa
+
+from backend.auth.routes import router as auth_router
+
 # -------------------------------------------------
 # FASTAPI APP
 # -------------------------------------------------
@@ -18,6 +21,8 @@ app = FastAPI(
 )
 
 app.include_router(jobs_router)
+app.include_router(auth_router)
+
 
 # -------------------------------------------------
 # STARTUP EVENT
