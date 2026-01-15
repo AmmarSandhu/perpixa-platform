@@ -3,6 +3,8 @@ from fastapi import FastAPI
 from backend.database import engine, Base
 from backend.jobs.models import Job  # noqa: F401 (ensures model is registered)
 
+from backend.credits.models import CreditBalance, CreditTransaction  # noqa
+
 # -------------------------------------------------
 # FASTAPI APP
 # -------------------------------------------------
