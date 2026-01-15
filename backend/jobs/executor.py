@@ -4,6 +4,9 @@ from backend.jobs.models import Job
 from backend.engines.video_engine.generate import run_job
 from backend.engines.video_engine.generate import SystemFailure, UserContentError
 
+from backend.credits.service import debit_credits, refund_credits
+from backend.config import VIDEO_JOB_COST
+
 
 def execute_job(job: Job, db: Session) -> Job:
     """
@@ -13,6 +16,17 @@ def execute_job(job: Job, db: Session) -> Job:
 
     if job.status != "queued":
         raise ValueError("Only queued jobs can be executed")
+
+    # ---------------------------------
+    # 0. Debit credits BEFORE execution
+    # ---------------------------------
+    debit_credits(
+        db,
+        user_id=job.user_id,
+        job_id=job.id,
+        amount=VIDEO_JOB_COST,
+        reason="video_job_execution",
+    )
 
     # ---------------------------------
     # 1. Mark job as running
@@ -25,7 +39,7 @@ def execute_job(job: Job, db: Session) -> Job:
         # ---------------------------------
         # 2. Execute engine
         # ---------------------------------
-        result = run_job(
+        run_job(
             job_id=str(job.id),
             user_id=job.user_id,
             config=job.config,
@@ -41,7 +55,7 @@ def execute_job(job: Job, db: Session) -> Job:
 
     except UserContentError as e:
         # ---------------------------------
-        # 4a. User failure (no refund)
+        # 4a. User failure (NO refund)
         # ---------------------------------
         job.status = "failed"
         job.error_type = "user"
@@ -49,20 +63,39 @@ def execute_job(job: Job, db: Session) -> Job:
 
     except SystemFailure as e:
         # ---------------------------------
-        # 4b. System failure (refund)
+        # 4b. System failure (REFUND)
         # ---------------------------------
         job.status = "failed"
         job.error_type = "system"
         job.error_message = str(e)
-        raise  # bubble up for refund handling later
+
+        # Refund credits on system failure
+        refund_credits(
+            db,
+            user_id=job.user_id,
+            job_id=job.id,
+            amount=VIDEO_JOB_COST,
+            reason="system_failure_refund",
+        )
+
+        raise  # bubble up for higher-level handling
 
     except Exception as e:
         # ---------------------------------
-        # 4c. Unknown failure → system
+        # 4c. Unknown failure → system (REFUND)
         # ---------------------------------
         job.status = "failed"
         job.error_type = "system"
         job.error_message = f"Unhandled error: {e}"
+
+        refund_credits(
+            db,
+            user_id=job.user_id,
+            job_id=job.id,
+            amount=VIDEO_JOB_COST,
+            reason="unhandled_system_failure_refund",
+        )
+
         raise
 
     finally:
