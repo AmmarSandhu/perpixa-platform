@@ -11,6 +11,8 @@ from backend.auth.models import MagicLinkToken  # noqa
 
 from backend.auth.routes import router as auth_router
 
+from backend.payments.routes import router as payments_router
+
 # -------------------------------------------------
 # FASTAPI APP
 # -------------------------------------------------
@@ -22,6 +24,7 @@ app = FastAPI(
 
 app.include_router(jobs_router)
 app.include_router(auth_router)
+app.include_router(payments_router)
 
 
 # -------------------------------------------------
