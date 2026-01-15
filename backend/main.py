@@ -5,6 +5,9 @@ from backend.jobs.models import Job  # noqa: F401 (ensures model is registered)
 
 from backend.credits.models import CreditBalance, CreditTransaction  # noqa
 from backend.jobs.routes import router as jobs_router
+
+from backend.users.models import User  # noqa
+from backend.auth.models import MagicLinkToken  # noqa
 # -------------------------------------------------
 # FASTAPI APP
 # -------------------------------------------------
