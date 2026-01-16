@@ -23,13 +23,21 @@ def submit_job(
     """
     Submit a new job for execution.
     """
+    input_type = job_config.get("input_type")
 
+    if not input_type:
+        raise HTTPException(
+            status_code=422,
+            detail="input_type is required in job_config",
+        )
+    
+    
     job = Job(
         id=uuid.uuid4(),
         user_id=str(current_user.id),
         engine="video",
         status="queued",
-        input_type=job_config.get("input_type"),
+        input_type=input_type,
         config=job_config,
         output_dir=f"outputs/{uuid.uuid4()}",
     )
